@@ -1,0 +1,634 @@
+import React, { useState, useEffect, useCallback } from 'react';
+import { View, Text, TouchableOpacity, ScrollView, StyleSheet } from 'react-native';
+import { MaterialIcons } from '@expo/vector-icons';
+import TopAppBar from '../components/TopAppBar';
+import BottomNavBar from '../components/BottomNavBar';
+import AchievementCard from '../components/AchievementCard';
+import ClaimRewardModal from '../components/ClaimRewardModal';
+import { router } from 'expo-router';
+import { useGameStore } from '../store/gameStore';
+import { ACHIEVEMENTS, computeAchievementProgress, Achievement } from '../config/awardsConfig';
+import { playSfx } from '../lib/soundManager';
+
+interface LeaderboardEntry {
+  rank: number;
+  name: string;
+  score: number;
+  badge: string;
+  avatarIcon: keyof typeof MaterialIcons.glyphMap;
+  avatarColor: string;
+  avatarBg: string;
+}
+
+const TOP_EXPLORERS: LeaderboardEntry[] = [
+  {
+    rank: 1,
+    name: 'StarGazer99',
+    score: 24500,
+    badge: 'GRAND MASTER',
+    avatarIcon: 'rocket-launch',
+    avatarColor: '#FFC300',
+    avatarBg: 'rgba(255, 195, 0, 0.25)',
+  },
+  {
+    rank: 2,
+    name: 'LexiconPro',
+    score: 23120,
+    badge: 'MASTER',
+    avatarIcon: 'psychology',
+    avatarColor: '#C0C0C0',
+    avatarBg: 'rgba(192, 192, 192, 0.25)',
+  },
+  {
+    rank: 3,
+    name: 'WordNinja_X',
+    score: 22850,
+    badge: 'EXPERT',
+    avatarIcon: 'military-tech',
+    avatarColor: '#CD7F32',
+    avatarBg: 'rgba(205, 127, 50, 0.25)',
+  },
+  {
+    rank: 4,
+    name: 'CosmicSolver',
+    score: 21400,
+    badge: 'VOYAGER',
+    avatarIcon: 'auto-awesome',
+    avatarColor: '#4cd7f6',
+    avatarBg: 'rgba(76, 215, 246, 0.15)',
+  },
+  {
+    rank: 5,
+    name: 'AstroScholar',
+    score: 19800,
+    badge: 'VOYAGER',
+    avatarIcon: 'school',
+    avatarColor: '#c084fc',
+    avatarBg: 'rgba(192, 132, 252, 0.15)',
+  },
+  {
+    rank: 6,
+    name: 'StarSeeker_07',
+    score: 18200,
+    badge: 'EXPLORER',
+    avatarIcon: 'explore',
+    avatarColor: '#34D399',
+    avatarBg: 'rgba(52, 211, 153, 0.15)',
+  },
+];
+
+export default function Leaderboard() {
+  const [activeTab, setActiveTab] = useState<'leaderboard' | 'medals'>('leaderboard');
+  const [medalFilter, setMedalFilter] = useState<'all' | 'unclaimed' | 'completed'>('all');
+  const [celebrationAchievement, setCelebrationAchievement] = useState<Achievement | null>(null);
+
+  // Store state with safe defaults
+  const userScore = useGameStore((state) => state.score) ?? 0;
+  const currentLevel = useGameStore((state) => state.currentLevel) ?? 1;
+  const streak = useGameStore((state) => state.streak) ?? 0;
+  const highestStreak = useGameStore((state) => state.highestStreak) ?? 0;
+  const playedWords = useGameStore((state) => state.playedWords) || [];
+  const coins = useGameStore((state) => state.coins) ?? 500;
+  const gameCompleted = Boolean(useGameStore((state) => state.gameCompleted));
+  const claimedAchievements = useGameStore((state) => state.claimedAchievements) || [];
+  const claimAchievement = useGameStore((state) => state.claimAchievement);
+
+  const safeClaimed = Array.isArray(claimedAchievements) ? claimedAchievements : [];
+  const safePlayedWords = Array.isArray(playedWords) ? playedWords : [];
+
+  // Timer countdown
+  const [timeLeft, setTimeLeft] = useState(8 * 3600 + 42 * 60 + 15);
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setTimeLeft((prev) => (prev > 0 ? prev - 1 : 0));
+    }, 1000);
+    return () => clearInterval(timer);
+  }, []);
+
+  const formatTime = (seconds: number) => {
+    const h = Math.floor(seconds / 3600);
+    const m = Math.floor((seconds % 3600) / 60);
+    const s = seconds % 60;
+    return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+  };
+
+  const dynamicUserScore = Math.max(userScore, 14250);
+  const userRank = dynamicUserScore > 24500 ? 1 : dynamicUserScore > 23120 ? 2 : dynamicUserScore > 22850 ? 3 : dynamicUserScore > 21400 ? 4 : 42;
+  const pointsToNextRank = Math.max(0, 22850 - dynamicUserScore + 50);
+
+  // Compute achievements status
+  const evaluatedAchievements = ACHIEVEMENTS.map((ach) => {
+    const progress = computeAchievementProgress(ach, {
+      currentLevel,
+      playedWords: safePlayedWords,
+      highestStreak,
+      streak,
+      coins,
+      gameCompleted,
+    });
+    const isClaimed = safeClaimed.includes(ach.id);
+    return {
+      achievement: ach,
+      ...progress,
+      isClaimed,
+    };
+  });
+
+  const totalUnlocked = evaluatedAchievements.filter((a) => a.isCompleted).length;
+  const totalUnclaimed = evaluatedAchievements.filter((a) => a.isCompleted && !a.isClaimed).length;
+
+  const filteredAchievements = evaluatedAchievements.filter((item) => {
+    if (medalFilter === 'unclaimed') return item.isCompleted && !item.isClaimed;
+    if (medalFilter === 'completed') return item.isCompleted;
+    return true;
+  });
+
+  const handleClaim = (ach: Achievement) => {
+    if (!ach || !claimAchievement) return;
+    const success = claimAchievement(ach.id, ach.coinReward);
+    if (success) {
+      playSfx('coinReward');
+      setCelebrationAchievement(ach);
+    }
+  };
+
+  return (
+    <View className="flex-1 bg-[#1A1C29]">
+      <TopAppBar />
+
+      {/* Top Segmented Tab Switcher */}
+      <View className="px-4 pt-3 pb-2">
+        <View className="bg-[#131520] p-1.5 rounded-2xl flex-row border border-[#2A2D3D]">
+          <TouchableOpacity
+            onPress={() => {
+              setActiveTab('leaderboard');
+              playSfx('click');
+            }}
+            activeOpacity={0.8}
+            className={`flex-1 py-2.5 rounded-xl items-center justify-center flex-row gap-1.5 ${
+              activeTab === 'leaderboard' ? 'bg-[#7C3AED] shadow-md' : ''
+            }`}
+          >
+            <MaterialIcons
+              name="leaderboard"
+              size={18}
+              color={activeTab === 'leaderboard' ? '#FFFFFF' : '#869397'}
+            />
+            <Text
+              className={`font-bold text-xs font-space uppercase tracking-wider ${
+                activeTab === 'leaderboard' ? 'text-white' : 'text-[#869397]'
+              }`}
+            >
+              Leaderboard
+            </Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            onPress={() => {
+              setActiveTab('medals');
+              playSfx('click');
+            }}
+            activeOpacity={0.8}
+            className={`flex-1 py-2.5 rounded-xl items-center justify-center flex-row gap-1.5 relative ${
+              activeTab === 'medals' ? 'bg-[#7C3AED] shadow-md' : ''
+            }`}
+          >
+            <MaterialIcons
+              name="military-tech"
+              size={18}
+              color={activeTab === 'medals' ? '#FFD700' : '#869397'}
+            />
+            <Text
+              className={`font-bold text-xs font-space uppercase tracking-wider ${
+                activeTab === 'medals' ? 'text-white' : 'text-[#869397]'
+              }`}
+            >
+              My Medals
+            </Text>
+            {totalUnclaimed > 0 && (
+              <View className="bg-[#FF6D00] px-1.5 py-0.5 rounded-full border border-white/40">
+                <Text className="text-white text-[9px] font-bold font-space">
+                  {totalUnclaimed}
+                </Text>
+              </View>
+            )}
+          </TouchableOpacity>
+        </View>
+      </View>
+
+      <ScrollView className="flex-1 px-4 py-2" contentContainerStyle={{ paddingBottom: 120 }}>
+        {activeTab === 'leaderboard' ? (
+          <>
+            {/* Header & Timer Section */}
+            <View className="items-center mb-4 mt-1">
+              <Text className="text-2xl text-white font-bold font-space mb-1">
+                Word Explorer Rankings
+              </Text>
+              <Text className="text-on-surface-variant text-xs font-space mb-2 opacity-80 text-center">
+                Climb the ranks by solving anagrams and keeping combo streaks alive!
+              </Text>
+              <View style={styles.glowCyan} className="flex-row items-center gap-2 bg-[#131520] px-4 py-1.5 rounded-full border border-[#06B6D4]/40">
+                <MaterialIcons name="timer" size={16} color="#06B6D4" />
+                <Text className="text-xs text-[#06B6D4] tracking-wider font-space font-bold">
+                  Daily duel resets in {formatTime(timeLeft)}
+                </Text>
+              </View>
+            </View>
+
+            {/* Your Standings Overview Card */}
+            <View style={styles.standingsCard} className="rounded-2xl p-4 mb-4">
+              <View className="flex-row justify-between items-center mb-2">
+                <View className="flex-row items-center gap-2">
+                  <MaterialIcons name="person-pin" size={22} color="#FFFFFF" />
+                  <Text className="text-base text-white font-bold font-space">Where You Stand</Text>
+                </View>
+                <View className="bg-[#5B21B6] px-3 py-1 rounded-full border border-[#8B5CF6]">
+                  <Text className="text-white font-bold text-xs tracking-wider font-space">
+                    RANK #{userRank} &bull; LEVEL {currentLevel}
+                  </Text>
+                </View>
+              </View>
+
+              <View className="flex-row justify-between items-end mb-2">
+                <View>
+                  <Text className="text-[#C4B5FD] text-xs font-space font-semibold">Your Total Score</Text>
+                  <Text className="text-white text-2xl font-bold font-space">
+                    {dynamicUserScore.toLocaleString()} pts
+                  </Text>
+                </View>
+                <View className="items-end">
+                  <Text className="text-[#C4B5FD] text-xs font-space font-semibold">Current Streak</Text>
+                  <View className="flex-row items-center gap-1">
+                    <MaterialIcons name="local-fire-department" size={20} color="#FFC300" />
+                    <Text className="text-white text-lg font-bold font-space">{streak} Words</Text>
+                  </View>
+                </View>
+              </View>
+
+              {/* Kid-Friendly Encouragement line */}
+              <View className="bg-[#1A1C29]/60 rounded-xl px-3 py-2 flex-row items-center gap-2 border border-white/10 mt-1">
+                <MaterialIcons name="stars" size={16} color="#FFD700" />
+                <Text className="text-[#E0E7FF] text-xs font-space flex-1">
+                  {userRank <= 3
+                    ? `Awesome job! You are in the Top 3 champion bracket!`
+                    : `Keep it up! Only ${pointsToNextRank} pts needed to pass Rank #${userRank - 1}!`}
+                </Text>
+              </View>
+            </View>
+
+            {/* Play CTA Button */}
+            <TouchableOpacity
+              onPress={() => router.push('/')}
+              style={styles.actionOrange}
+              className="w-full rounded-2xl items-center justify-center py-3.5 mb-4 flex-row gap-2 active:scale-95"
+            >
+              <MaterialIcons name="play-arrow" size={24} color="white" />
+              <Text className="text-white font-bold text-base font-space">
+                Play Quest & Earn Points
+              </Text>
+            </TouchableOpacity>
+
+            {/* DIRECT RANKED EXPLORERS LIST */}
+            <View className="mb-2">
+              <View className="flex-row items-center justify-between mb-2 px-1">
+                <Text className="text-white text-base font-bold font-space">
+                  Current Leaderboard Positions
+                </Text>
+                <Text className="text-on-surface-variant text-xs font-space">
+                  Ranked #1 to #6+
+                </Text>
+              </View>
+
+              {/* Full Sequential Ranked List */}
+              {TOP_EXPLORERS.map((item) => {
+                const isFirst = item.rank === 1;
+                const isSecond = item.rank === 2;
+                const isThird = item.rank === 3;
+
+                return (
+                  <View
+                    key={item.rank}
+                    style={
+                      isFirst
+                        ? styles.firstPlaceCard
+                        : isSecond
+                        ? styles.secondPlaceCard
+                        : isThird
+                        ? styles.thirdPlaceCard
+                        : styles.standardRankCard
+                    }
+                    className="rounded-2xl p-3.5 flex-row items-center gap-3 mb-2.5 border"
+                  >
+                    {/* Explicit Rank Number / Medal Badge */}
+                    <View
+                      style={{
+                        backgroundColor: isFirst
+                          ? '#FFD700'
+                          : isSecond
+                          ? '#C0C0C0'
+                          : isThird
+                          ? '#CD7F32'
+                          : '#131520',
+                        borderColor: isFirst
+                          ? '#FFA000'
+                          : isSecond
+                          ? '#E0E0E0'
+                          : isThird
+                          ? '#8D5B28'
+                          : '#2A2D3D',
+                      }}
+                      className="w-10 h-10 rounded-xl items-center justify-center border"
+                    >
+                      {isFirst ? (
+                        <Text className="text-[#10131F] font-extrabold text-sm font-space">👑 1</Text>
+                      ) : isSecond ? (
+                        <Text className="text-[#10131F] font-extrabold text-sm font-space">🥈 2</Text>
+                      ) : isThird ? (
+                        <Text className="text-white font-extrabold text-sm font-space">🥉 3</Text>
+                      ) : (
+                        <Text className="text-[#869397] font-bold text-sm font-space">#{item.rank}</Text>
+                      )}
+                    </View>
+
+                    {/* Avatar */}
+                    <View
+                      style={{ backgroundColor: item.avatarBg, borderColor: item.avatarColor }}
+                      className="w-11 h-11 rounded-full border-2 items-center justify-center"
+                    >
+                      <MaterialIcons name={item.avatarIcon} size={22} color={item.avatarColor} />
+                    </View>
+
+                    {/* Name & Badge */}
+                    <View className="flex-1">
+                      <View className="flex-row items-center gap-1.5">
+                        <Text className="text-white text-sm font-bold font-space">
+                          {item.name}
+                        </Text>
+                        {isFirst && (
+                          <View className="bg-[#FFD700]/20 px-2 py-0.5 rounded-full border border-[#FFD700]/50">
+                            <Text className="text-[#FFD700] text-[9px] font-extrabold font-space">CHAMPION</Text>
+                          </View>
+                        )}
+                      </View>
+                      <Text className="text-on-surface-variant text-xs font-space mt-0.5">
+                        {item.badge}
+                      </Text>
+                    </View>
+
+                    {/* Score */}
+                    <View className="items-end">
+                      <Text
+                        style={{
+                          color: isFirst
+                            ? '#FFD700'
+                            : isSecond
+                            ? '#C0C0C0'
+                            : isThird
+                            ? '#CD7F32'
+                            : '#4CD7F6',
+                        }}
+                        className="text-sm font-bold font-space"
+                      >
+                        {item.score.toLocaleString()}
+                      </Text>
+                      <Text className="text-on-surface-variant text-[10px] font-space">points</Text>
+                    </View>
+                  </View>
+                );
+              })}
+
+              {/* Your Personal Rank Card in List */}
+              <View
+                className="bg-[#1D1F2C] rounded-2xl p-3.5 flex-row items-center gap-3 border-2 border-[#06B6D4] mt-1 mb-2"
+                style={styles.glowCyan}
+              >
+                <View className="w-10 h-10 rounded-xl items-center justify-center bg-[#06B6D4] border border-[#00FFFF]">
+                  <Text className="text-[#003640] font-extrabold text-sm font-space">#{userRank}</Text>
+                </View>
+
+                <View className="w-11 h-11 rounded-full border-2 border-[#06B6D4] bg-[#7C3AED] items-center justify-center">
+                  <MaterialIcons name="person" size={24} color="white" />
+                </View>
+
+                <View className="flex-1">
+                  <View className="flex-row items-center gap-1.5">
+                    <Text className="text-white text-sm font-bold font-space">You (Explorer)</Text>
+                    <View className="bg-[#06B6D4] px-2 py-0.5 rounded-full">
+                      <Text className="text-[#003640] font-bold text-[9px] font-space">YOUR RANK</Text>
+                    </View>
+                  </View>
+                  <Text className="text-[#06B6D4] text-xs font-space mt-0.5">
+                    Campaign Level {currentLevel}
+                  </Text>
+                </View>
+
+                <View className="items-end">
+                  <Text className="text-[#06B6D4] text-sm font-bold font-space">
+                    {dynamicUserScore.toLocaleString()}
+                  </Text>
+                  <Text className="text-on-surface-variant text-[10px] font-space">points</Text>
+                </View>
+              </View>
+            </View>
+          </>
+        ) : (
+          /* MY MEDALS VIEW */
+          <>
+            {/* Medals Summary Banner */}
+            <View style={styles.medalsHeader} className="rounded-2xl p-4 mb-4 border border-[#FFD700]/30">
+              <View className="flex-row justify-between items-center mb-2">
+                <View className="flex-row items-center gap-2">
+                  <MaterialIcons name="emoji-events" size={24} color="#FFD700" />
+                  <Text className="text-lg text-white font-bold font-space">Your Trophy Case</Text>
+                </View>
+                <View className="bg-[#FFD700] px-2.5 py-0.5 rounded-full">
+                  <Text className="text-[#10131F] font-bold text-xs font-space">
+                    {totalUnlocked} / {ACHIEVEMENTS.length} Won
+                  </Text>
+                </View>
+              </View>
+
+              <Text className="text-[#E0E7FF] text-xs font-space mb-2.5">
+                Complete quests while playing to win shiny medals and free coins!
+              </Text>
+
+              {/* Progress bar */}
+              <View style={styles.overallTrack} className="w-full h-3 rounded-full overflow-hidden">
+                <View
+                  style={[
+                    styles.overallFill,
+                    {
+                      width: `${
+                        ACHIEVEMENTS.length > 0
+                          ? Math.min(100, Math.max(0, Math.round((totalUnlocked / ACHIEVEMENTS.length) * 100)))
+                          : 0
+                      }%`,
+                    },
+                  ]}
+                  className="h-full rounded-full"
+                />
+              </View>
+            </View>
+
+            {/* Filter Chips */}
+            <View className="flex-row gap-2 mb-3.5">
+              <TouchableOpacity
+                onPress={() => setMedalFilter('all')}
+                className={`px-3 py-1.5 rounded-full border ${
+                  medalFilter === 'all'
+                    ? 'bg-[#7C3AED] border-[#8B5CF6]'
+                    : 'bg-[#131520] border-[#2A2D3D]'
+                }`}
+              >
+                <Text className={`text-xs font-bold font-space ${medalFilter === 'all' ? 'text-white' : 'text-[#869397]'}`}>
+                  All ({ACHIEVEMENTS.length})
+                </Text>
+              </TouchableOpacity>
+
+              {totalUnclaimed > 0 && (
+                <TouchableOpacity
+                  onPress={() => setMedalFilter('unclaimed')}
+                  className={`px-3 py-1.5 rounded-full border flex-row items-center gap-1 ${
+                    medalFilter === 'unclaimed'
+                      ? 'bg-[#FF6D00] border-[#FFA000]'
+                      : 'bg-[#232115] border-[#FFD700]/50'
+                  }`}
+                >
+                  <MaterialIcons name="card-giftcard" size={14} color="#FFD700" />
+                  <Text className="text-xs font-bold font-space text-[#FFD700]">
+                    Ready to Claim ({totalUnclaimed})
+                  </Text>
+                </TouchableOpacity>
+              )}
+
+              <TouchableOpacity
+                onPress={() => setMedalFilter('completed')}
+                className={`px-3 py-1.5 rounded-full border ${
+                  medalFilter === 'completed'
+                    ? 'bg-[#7C3AED] border-[#8B5CF6]'
+                    : 'bg-[#131520] border-[#2A2D3D]'
+                }`}
+              >
+                <Text className={`text-xs font-bold font-space ${medalFilter === 'completed' ? 'text-white' : 'text-[#869397]'}`}>
+                  Won ({totalUnlocked})
+                </Text>
+              </TouchableOpacity>
+            </View>
+
+            {/* Achievement Cards List */}
+            {filteredAchievements.map((item) => (
+              <AchievementCard
+                key={item.achievement.id}
+                achievement={item.achievement}
+                current={item.current}
+                target={item.target}
+                percent={item.percent}
+                isCompleted={item.isCompleted}
+                isClaimed={item.isClaimed}
+                onClaim={() => handleClaim(item.achievement)}
+              />
+            ))}
+          </>
+        )}
+      </ScrollView>
+
+      {/* Celebratory Reward Modal */}
+      <ClaimRewardModal
+        visible={celebrationAchievement !== null}
+        achievement={celebrationAchievement}
+        onClose={() => setCelebrationAchievement(null)}
+      />
+
+      <BottomNavBar activeTab="Awards" />
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  glowCyan: {
+    shadowColor: '#06B6D4',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.35,
+    shadowRadius: 10,
+    elevation: 6,
+  },
+  glowGold: {
+    shadowColor: '#FFD700',
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.7,
+    shadowRadius: 14,
+    elevation: 8,
+  },
+  firstPlaceCard: {
+    backgroundColor: '#261F10',
+    borderColor: '#FFD700',
+    borderWidth: 1.5,
+    shadowColor: '#FFD700',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.35,
+    shadowRadius: 10,
+    elevation: 6,
+  },
+  secondPlaceCard: {
+    backgroundColor: '#1E212D',
+    borderColor: '#C0C0C0',
+    borderWidth: 1,
+    shadowColor: '#C0C0C0',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 8,
+    elevation: 4,
+  },
+  thirdPlaceCard: {
+    backgroundColor: '#231B16',
+    borderColor: '#CD7F32',
+    borderWidth: 1,
+    shadowColor: '#CD7F32',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 8,
+    elevation: 4,
+  },
+  standardRankCard: {
+    backgroundColor: '#161826',
+    borderColor: '#26293A',
+    borderWidth: 1,
+  },
+  standingsCard: {
+    backgroundColor: '#7C3AED',
+    borderColor: '#8B5CF6',
+    borderWidth: 1,
+    shadowColor: '#7C3AED',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 20,
+    elevation: 8,
+  },
+  medalsHeader: {
+    backgroundColor: '#261F3D',
+    shadowColor: '#7C3AED',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.25,
+    shadowRadius: 12,
+    elevation: 6,
+  },
+  overallTrack: {
+    backgroundColor: '#131520',
+    borderColor: '#323442',
+    borderWidth: 1,
+  },
+  overallFill: {
+    backgroundColor: '#FFD700',
+  },
+  actionOrange: {
+    backgroundColor: '#FF6D00',
+    shadowColor: '#FF6D00',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.4,
+    shadowRadius: 12,
+    borderBottomWidth: 4,
+    borderBottomColor: '#CC5800',
+    elevation: 8,
+  },
+});

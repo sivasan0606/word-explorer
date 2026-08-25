@@ -1,0 +1,17 @@
+{
+  "extends": "../tsconfig.json",
+  "compilerOptions": {
+    "strict": true,
+    "jsx": "react-jsx",
+    "esModuleInterop": true,
+    "allowSyntheticDefaultImports": true,
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "paths": {
+      "@react-native-async-storage/async-storage": ["./__mocks__/async-storage.ts"],
+      "react-native": ["./__mocks__/react-native.ts"],
+      "expo-router": ["./__mocks__/expo-router.ts"]
+    }
+  },
+  "include": ["./run-tests.ts", "../data/**/*.ts", "../config/**/*.ts", "../store/**/*.ts", "../app/**/*.tsx"]
+}
