@@ -73,7 +73,7 @@ export default function Layout() {
     SpaceGrotesk_700Bold,
   });
 
-  if (!fontsLoaded) {
+  if (!fontsLoaded && Platform.OS !== 'web') {
     return null;
   }
 
