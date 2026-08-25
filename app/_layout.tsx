@@ -4,6 +4,7 @@ import { SpaceGrotesk_400Regular, SpaceGrotesk_600SemiBold, SpaceGrotesk_700Bold
 import { StatusBar } from 'expo-status-bar';
 import { LogBox } from 'react-native';
 import React, { useEffect, useRef } from 'react';
+import { Platform } from 'react-native';
 import { useAudioPlayer, setAudioModeAsync } from 'expo-audio';
 import { configureReanimatedLogger, ReanimatedLogLevel } from 'react-native-reanimated';
 import { useGameStore } from '../store/gameStore';
@@ -81,7 +82,7 @@ export default function Layout() {
   // A double SafeAreaProvider breaks the navigation context chain.
   return (
     <>
-      <BackgroundMusic />
+      {Platform.OS !== 'web' && <BackgroundMusic />}
       <StatusBar style="light" />
       <Stack
         screenOptions={{
